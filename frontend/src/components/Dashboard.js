@@ -15,8 +15,11 @@ const Dashboard = () => {
   const [useBackend, setUseBackend] = useState(false);
 
   useEffect(() => {
-    checkBackendConnection();
-    fetchNotes();
+    const initializeDashboard = async () => {
+      await checkBackendConnection();
+      await fetchNotes();
+    };
+    initializeDashboard();
   }, []);
 
   useEffect(() => {
@@ -36,9 +39,11 @@ const Dashboard = () => {
       await checkHealth();
       setUseBackend(true);
       console.log('✅ Backend connected successfully');
+      return true;
     } catch (error) {
       setUseBackend(false);
       console.log('⚠️ Backend not available, using localStorage');
+      return false;
     }
   };
 
@@ -47,7 +52,13 @@ const Dashboard = () => {
       setLoading(true);
       setError('');
 
-      if (useBackend) {
+      // Check backend connection first
+      let isBackendAvailable = useBackend;
+      if (!isBackendAvailable) {
+        isBackendAvailable = await checkBackendConnection();
+      }
+
+      if (isBackendAvailable) {
         // Fetch from backend
         const fetchedNotes = await notesAPI.getAllNotes();
         setNotes(fetchedNotes);
@@ -101,17 +112,31 @@ const Dashboard = () => {
 
   const deleteNote = async (noteId) => {
     try {
-      if (useBackend) {
-        // Delete via backend
-        await notesAPI.deleteNote(noteId);
-      } else {
+      // Check backend connection
+      let isBackendAvailable = useBackend;
+      
+      if (isBackendAvailable) {
+        try {
+          // Delete via backend
+          await notesAPI.deleteNote(noteId);
+          console.log('✅ Note deleted from backend');
+        } catch (backendError) {
+          console.error('Backend delete failed, falling back to localStorage:', backendError);
+          isBackendAvailable = false;
+          setUseBackend(false);
+        }
+      }
+      
+      if (!isBackendAvailable) {
         // Fallback to localStorage
         const storedNotes = JSON.parse(localStorage.getItem('notes') || '[]');
         const updatedNotes = storedNotes.filter(note => note.id !== noteId);
         localStorage.setItem('notes', JSON.stringify(updatedNotes));
+        console.log('✅ Note deleted from localStorage');
       }
       
-      setNotes(notes.filter(note => note.id !== noteId));
+      // Update local state regardless of storage method
+      setNotes(prevNotes => prevNotes.filter(note => note.id !== noteId));
     } catch (error) {
       console.error('Error deleting note:', error);
       setError('Failed to delete note. Please try again.');
