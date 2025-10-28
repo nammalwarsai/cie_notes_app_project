@@ -114,25 +114,35 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Get current user profile
-app.get('/api/auth/profile', authenticateToken, (req, res) => {
-  const user = users.find(u => u.id === req.user.id);
+// Get current user profile (No Auth Required)
+app.get('/api/auth/profile', (req, res) => {
+  const userEmail = req.headers['x-user-email'] || req.query.email;
+  
+  if (!userEmail) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const user = users.find(u => u.email === userEmail);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
   res.json({ email: user.email, id: user.id });
 });
 
-// Update password
-app.put('/api/auth/password', authenticateToken, async (req, res) => {
+// Update password (No Auth Required)
+app.put('/api/auth/password', async (req, res) => {
   try {
-    const { newPassword } = req.body;
+    const { email, newPassword } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
 
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    const user = users.find(u => u.id === req.user.id);
+    const user = users.find(u => u.email === email);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -149,34 +159,53 @@ app.put('/api/auth/password', authenticateToken, async (req, res) => {
 
 // ============ NOTES ROUTES ============
 
-// Get all notes for logged-in user
-app.get('/api/notes', authenticateToken, (req, res) => {
-  const userNotes = notes.filter(note => note.userId === req.user.id);
-  res.json(userNotes);
+// Get all notes for user (No Auth Required)
+app.get('/api/notes', (req, res) => {
+  const userEmail = req.headers['x-user-email'] || req.query.email;
+  
+  if (userEmail) {
+    const user = users.find(u => u.email === userEmail);
+    if (user) {
+      const userNotes = notes.filter(note => note.userId === user.id);
+      return res.json(userNotes);
+    }
+  }
+  
+  // Return all notes if no email provided
+  res.json(notes);
 });
 
-// Get single note
-app.get('/api/notes/:id', authenticateToken, (req, res) => {
-  const note = notes.find(n => n.id === parseInt(req.params.id) && n.userId === req.user.id);
+// Get single note (No Auth Required)
+app.get('/api/notes/:id', (req, res) => {
+  const note = notes.find(n => n.id === parseInt(req.params.id));
   if (!note) {
     return res.status(404).json({ error: 'Note not found' });
   }
   res.json(note);
 });
 
-// Create a new note
-app.post('/api/notes', authenticateToken, (req, res) => {
+// Create a new note (No Auth Required)
+app.post('/api/notes', (req, res) => {
   try {
-    const { title, content, category, priority } = req.body;
+    const { title, content, category, priority, userEmail } = req.body;
 
     if (!title || !content) {
       return res.status(400).json({ error: 'Title and content are required' });
     }
 
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+
+    const user = users.find(u => u.email === userEmail);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     const newNote = {
       id: Date.now(),
-      userId: req.user.id,
-      userEmail: req.user.email,
+      userId: user.id,
+      userEmail: user.email,
       title,
       content,
       category: category || 'General',
@@ -193,15 +222,20 @@ app.post('/api/notes', authenticateToken, (req, res) => {
   }
 });
 
-// Update a note
-app.put('/api/notes/:id', authenticateToken, (req, res) => {
+// Update a note (No Auth Required)
+app.put('/api/notes/:id', (req, res) => {
   try {
     const noteId = parseInt(req.params.id);
-    const { title, content, category, priority } = req.body;
+    const { title, content, category, priority, userEmail } = req.body;
 
-    const noteIndex = notes.findIndex(n => n.id === noteId && n.userId === req.user.id);
+    const noteIndex = notes.findIndex(n => n.id === noteId);
     if (noteIndex === -1) {
       return res.status(404).json({ error: 'Note not found' });
+    }
+
+    // Optional: Verify user ownership if email is provided
+    if (userEmail && notes[noteIndex].userEmail !== userEmail) {
+      return res.status(403).json({ error: 'Not authorized to update this note' });
     }
 
     // Update note
@@ -221,14 +255,21 @@ app.put('/api/notes/:id', authenticateToken, (req, res) => {
   }
 });
 
-// Delete a note
-app.delete('/api/notes/:id', authenticateToken, (req, res) => {
+// Delete a note (No Auth Required)
+app.delete('/api/notes/:id', (req, res) => {
   try {
     const noteId = parseInt(req.params.id);
-    const noteIndex = notes.findIndex(n => n.id === noteId && n.userId === req.user.id);
+    const userEmail = req.headers['x-user-email'] || req.query.email;
+    
+    const noteIndex = notes.findIndex(n => n.id === noteId);
 
     if (noteIndex === -1) {
       return res.status(404).json({ error: 'Note not found' });
+    }
+
+    // Optional: Verify user ownership if email is provided
+    if (userEmail && notes[noteIndex].userEmail !== userEmail) {
+      return res.status(403).json({ error: 'Not authorized to delete this note' });
     }
 
     notes.splice(noteIndex, 1);
@@ -241,9 +282,19 @@ app.delete('/api/notes/:id', authenticateToken, (req, res) => {
 
 // ============ STATS ROUTE ============
 
-// Get user statistics
-app.get('/api/stats', authenticateToken, (req, res) => {
-  const userNotes = notes.filter(note => note.userId === req.user.id);
+// Get user statistics (No Auth Required)
+app.get('/api/stats', (req, res) => {
+  const userEmail = req.headers['x-user-email'] || req.query.email;
+  
+  let userNotes = notes;
+  
+  // Filter by user email if provided
+  if (userEmail) {
+    const user = users.find(u => u.email === userEmail);
+    if (user) {
+      userNotes = notes.filter(note => note.userId === user.id);
+    }
+  }
   
   const stats = {
     totalNotes: userNotes.length,
@@ -265,6 +316,27 @@ app.get('/api/stats', authenticateToken, (req, res) => {
   res.json(stats);
 });
 
+// Get public statistics (no authentication required)
+app.get('/api/stats/public', (req, res) => {
+  const stats = {
+    totalUsers: users.length,
+    totalNotes: notes.length,
+    notesByPriority: {
+      High: notes.filter(n => n.priority === 'High').length,
+      Medium: notes.filter(n => n.priority === 'Medium').length,
+      Low: notes.filter(n => n.priority === 'Low').length
+    },
+    notesByCategory: {}
+  };
+
+  // Count all notes by category
+  notes.forEach(note => {
+    stats.notesByCategory[note.category] = (stats.notesByCategory[note.category] || 0) + 1;
+  });
+
+  res.json(stats);
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -276,18 +348,59 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Root endpoint - API documentation
+app.get('/', (req, res) => {
+  res.json({
+    message: '📝 Notes App API - NO AUTH REQUIRED',
+    version: '1.0.0',
+    authentication: 'DISABLED - All endpoints are publicly accessible',
+    endpoints: {
+      health: 'GET /api/health - Health check',
+      auth: {
+        register: 'POST /api/auth/register - Register new user',
+        login: 'POST /api/auth/login - Login user',
+        profile: 'GET /api/auth/profile?email=user@example.com - Get user profile',
+        updatePassword: 'PUT /api/auth/password - Update password'
+      },
+      notes: {
+        getAll: 'GET /api/notes - Get all notes (or ?email=user@example.com for user notes)',
+        getOne: 'GET /api/notes/:id - Get single note',
+        create: 'POST /api/notes - Create note (include userEmail in body)',
+        update: 'PUT /api/notes/:id - Update note',
+        delete: 'DELETE /api/notes/:id - Delete note'
+      },
+      stats: {
+        user: 'GET /api/stats?email=user@example.com - Get user statistics',
+        public: 'GET /api/stats/public - Get public statistics'
+      }
+    },
+    note: 'All endpoints are open - No authentication required!'
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`📝 API Documentation:`);
-  console.log(`   - POST /api/auth/register - Register new user`);
-  console.log(`   - POST /api/auth/login - Login user`);
-  console.log(`   - GET  /api/auth/profile - Get user profile`);
-  console.log(`   - PUT  /api/auth/password - Update password`);
-  console.log(`   - GET  /api/notes - Get all notes`);
-  console.log(`   - POST /api/notes - Create note`);
-  console.log(`   - PUT  /api/notes/:id - Update note`);
-  console.log(`   - DELETE /api/notes/:id - Delete note`);
-  console.log(`   - GET  /api/stats - Get user statistics`);
-  console.log(`   - GET  /api/health - Health check`);
+  console.log(`📝 API Documentation - ALL ENDPOINTS NO AUTH REQUIRED:`);
+  console.log(``);
+  console.log(`   Auth Endpoints:`);
+  console.log(`   - POST /api/auth/register    - Register new user`);
+  console.log(`   - POST /api/auth/login       - Login user`);
+  console.log(`   - GET  /api/auth/profile     - Get user profile`);
+  console.log(`   - PUT  /api/auth/password    - Update password`);
+  console.log(``);
+  console.log(`   Notes Endpoints:`);
+  console.log(`   - GET  /api/notes            - Get all notes`);
+  console.log(`   - GET  /api/notes/:id        - Get single note`);
+  console.log(`   - POST /api/notes            - Create note`);
+  console.log(`   - PUT  /api/notes/:id        - Update note`);
+  console.log(`   - DELETE /api/notes/:id      - Delete note`);
+  console.log(``);
+  console.log(`   Stats & Utility:`);
+  console.log(`   - GET  /api/stats            - Get statistics`);
+  console.log(`   - GET  /api/stats/public     - Get public statistics`);
+  console.log(`   - GET  /api/health           - Health check`);
+  console.log(`   - GET  /                     - API documentation`);
+  console.log(``);
+  console.log(`   ✅ NO AUTHENTICATION REQUIRED - All endpoints are open!`);
 });

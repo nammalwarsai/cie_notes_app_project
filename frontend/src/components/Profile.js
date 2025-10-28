@@ -41,7 +41,7 @@ const Profile = () => {
 
     try {
       // Try backend API first
-      await authAPI.updatePassword(newPassword);
+      await authAPI.updatePassword(user.email, newPassword);
       setSuccess('Password updated successfully!');
       setIsEditing(false);
       setNewPassword('');

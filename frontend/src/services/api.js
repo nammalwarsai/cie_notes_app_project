@@ -10,12 +10,12 @@ const api = axios.create({
   }
 });
 
-// Add token to requests if it exists
+// Add user email to requests (NO TOKEN - Just email)
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    if (user.email) {
+      config.headers['x-user-email'] = user.email;
     }
     return config;
   },
@@ -24,16 +24,11 @@ api.interceptors.request.use(
   }
 );
 
-// Handle response errors
+// Handle response errors (Simplified - no auth redirect)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid
-      localStorage.removeItem('token');
-      localStorage.removeItem('currentUser');
-      window.location.href = '/login';
-    }
+    console.error('API Error:', error.response?.data || error.message);
     return Promise.reject(error);
   }
 );
@@ -43,25 +38,29 @@ api.interceptors.response.use(
 export const authAPI = {
   register: async (email, password) => {
     const response = await api.post('/auth/register', { email, password });
-    return response.data;
-  },
-
-  login: async (email, password) => {
-    const response = await api.post('/auth/login', { email, password });
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token);
+    // Store user info (no token needed)
+    if (response.data.user) {
       localStorage.setItem('currentUser', JSON.stringify(response.data.user));
     }
     return response.data;
   },
 
-  getProfile: async () => {
-    const response = await api.get('/auth/profile');
+  login: async (email, password) => {
+    const response = await api.post('/auth/login', { email, password });
+    // Store user info (no token needed)
+    if (response.data.user) {
+      localStorage.setItem('currentUser', JSON.stringify(response.data.user));
+    }
     return response.data;
   },
 
-  updatePassword: async (newPassword) => {
-    const response = await api.put('/auth/password', { newPassword });
+  getProfile: async (email) => {
+    const response = await api.get('/auth/profile', { params: { email } });
+    return response.data;
+  },
+
+  updatePassword: async (email, newPassword) => {
+    const response = await api.put('/auth/password', { email, newPassword });
     return response.data;
   }
 };
@@ -70,7 +69,8 @@ export const authAPI = {
 
 export const notesAPI = {
   getAllNotes: async () => {
-    const response = await api.get('/notes');
+    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const response = await api.get('/notes', { params: { email: user.email } });
     return response.data;
   },
 
@@ -80,17 +80,20 @@ export const notesAPI = {
   },
 
   createNote: async (noteData) => {
-    const response = await api.post('/notes', noteData);
+    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const response = await api.post('/notes', { ...noteData, userEmail: user.email });
     return response.data;
   },
 
   updateNote: async (id, noteData) => {
-    const response = await api.put(`/notes/${id}`, noteData);
+    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const response = await api.put(`/notes/${id}`, { ...noteData, userEmail: user.email });
     return response.data;
   },
 
   deleteNote: async (id) => {
-    const response = await api.delete(`/notes/${id}`);
+    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const response = await api.delete(`/notes/${id}`, { params: { email: user.email } });
     return response.data;
   }
 };
@@ -99,7 +102,8 @@ export const notesAPI = {
 
 export const statsAPI = {
   getUserStats: async () => {
-    const response = await api.get('/stats');
+    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const response = await api.get('/stats', { params: { email: user.email } });
     return response.data;
   }
 };
