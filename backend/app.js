@@ -1,17 +1,17 @@
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
+
+// Import services
+const userService = require('./services/userService');
+const notesService = require('./services/notesService');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const JWT_SECRET = 'your-secret-key-change-in-production';
-
-// In-memory storage (for development - use database in production)
-let users = [];
-let notes = [];
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
@@ -47,23 +47,13 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = users.find(u => u.email === email);
+    const existingUser = await userService.findUserByEmail(email);
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create new user
-    const newUser = {
-      id: Date.now(),
-      email,
-      password: hashedPassword,
-      createdAt: new Date().toISOString()
-    };
-
-    users.push(newUser);
+    // Create new user in DynamoDB
+    const newUser = await userService.createUser(email, password);
 
     // Generate JWT token
     const token = jwt.sign({ id: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: '7d' });
@@ -75,7 +65,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Server error during registration' });
+    res.status(500).json({ error: error.message || 'Server error during registration' });
   }
 });
 
@@ -88,25 +78,25 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Find user
-    const user = users.find(u => u.email === email);
+    // Find user in DynamoDB
+    const user = await userService.findUserByEmail(email);
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const isValidPassword = await userService.verifyPassword(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // Generate JWT token
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.PK, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user.id, email: user.email }
+      user: { id: user.PK, email: user.email }
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -115,18 +105,23 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Get current user profile (No Auth Required)
-app.get('/api/auth/profile', (req, res) => {
-  const userEmail = req.headers['x-user-email'] || req.query.email;
-  
-  if (!userEmail) {
-    return res.status(400).json({ error: 'Email is required' });
-  }
+app.get('/api/auth/profile', async (req, res) => {
+  try {
+    const userEmail = req.headers['x-user-email'] || req.query.email;
+    
+    if (!userEmail) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
 
-  const user = users.find(u => u.email === userEmail);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+    const user = await userService.findUserByEmail(userEmail);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ email: user.email, id: user.PK });
+  } catch (error) {
+    console.error('Profile error:', error);
+    res.status(500).json({ error: 'Server error fetching profile' });
   }
-  res.json({ email: user.email, id: user.id });
 });
 
 // Update password (No Auth Required)
@@ -142,52 +137,76 @@ app.put('/api/auth/password', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    const user = users.find(u => u.email === email);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Hash new password
-    user.password = await bcrypt.hash(newPassword, 10);
-
+    await userService.updatePassword(email, newPassword);
     res.json({ message: 'Password updated successfully' });
   } catch (error) {
     console.error('Password update error:', error);
-    res.status(500).json({ error: 'Server error during password update' });
+    res.status(500).json({ error: error.message || 'Server error during password update' });
   }
 });
 
 // ============ NOTES ROUTES ============
 
 // Get all notes for user (No Auth Required)
-app.get('/api/notes', (req, res) => {
-  const userEmail = req.headers['x-user-email'] || req.query.email;
-  
-  if (userEmail) {
-    const user = users.find(u => u.email === userEmail);
-    if (user) {
-      const userNotes = notes.filter(note => note.userId === user.id);
-      return res.json(userNotes);
+app.get('/api/notes', async (req, res) => {
+  try {
+    const userEmail = req.headers['x-user-email'] || req.query.email;
+    
+    console.log('📝 GET /api/notes - Email:', userEmail);
+    
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
     }
+
+    const user = await userService.findUserByEmail(userEmail);
+    console.log('👤 User found:', user ? user.PK : 'NOT FOUND');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userNotes = await notesService.getUserNotes(user.PK);
+    console.log('📋 Notes fetched:', userNotes.length);
+    res.json(userNotes);
+  } catch (error) {
+    console.error('❌ Get notes error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Server error fetching notes', details: error.message });
   }
-  
-  // Return all notes if no email provided
-  res.json(notes);
 });
 
 // Get single note (No Auth Required)
-app.get('/api/notes/:id', (req, res) => {
-  const note = notes.find(n => n.id === parseInt(req.params.id));
-  if (!note) {
-    return res.status(404).json({ error: 'Note not found' });
+app.get('/api/notes/:id', async (req, res) => {
+  try {
+    const noteId = req.params.id;
+    const userEmail = req.headers['x-user-email'] || req.query.email;
+
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+
+    const user = await userService.findUserByEmail(userEmail);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const note = await notesService.getNote(user.PK, noteId);
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    res.json(note);
+  } catch (error) {
+    console.error('Get note error:', error);
+    res.status(500).json({ error: 'Server error fetching note' });
   }
-  res.json(note);
 });
 
 // Create a new note (No Auth Required)
-app.post('/api/notes', (req, res) => {
+app.post('/api/notes', async (req, res) => {
   try {
     const { title, content, category, priority, userEmail } = req.body;
+
+    console.log('✍️ POST /api/notes - Data:', { title, userEmail, category, priority });
 
     if (!title || !content) {
       return res.status(400).json({ error: 'Title and content are required' });
@@ -197,58 +216,59 @@ app.post('/api/notes', (req, res) => {
       return res.status(400).json({ error: 'User email is required' });
     }
 
-    const user = users.find(u => u.email === userEmail);
+    const user = await userService.findUserByEmail(userEmail);
+    console.log('👤 User found for note creation:', user ? user.PK : 'NOT FOUND');
+    
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const newNote = {
-      id: Date.now(),
-      userId: user.id,
-      userEmail: user.email,
+    const newNote = await notesService.createNote(user.PK, {
       title,
       content,
-      category: category || 'General',
-      priority: priority || 'Medium',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+      category,
+      priority
+    });
 
-    notes.push(newNote);
+    console.log('✅ Note created:', newNote.noteId);
     res.status(201).json({ message: 'Note created successfully', note: newNote });
   } catch (error) {
-    console.error('Create note error:', error);
-    res.status(500).json({ error: 'Server error while creating note' });
+    console.error('❌ Create note error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Server error while creating note', details: error.message });
   }
 });
 
 // Update a note (No Auth Required)
-app.put('/api/notes/:id', (req, res) => {
+app.put('/api/notes/:id', async (req, res) => {
   try {
-    const noteId = parseInt(req.params.id);
+    const noteId = req.params.id;
     const { title, content, category, priority, userEmail } = req.body;
 
-    const noteIndex = notes.findIndex(n => n.id === noteId);
-    if (noteIndex === -1) {
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+
+    const user = await userService.findUserByEmail(userEmail);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if note exists
+    const existingNote = await notesService.getNote(user.PK, noteId);
+    if (!existingNote) {
       return res.status(404).json({ error: 'Note not found' });
     }
 
-    // Optional: Verify user ownership if email is provided
-    if (userEmail && notes[noteIndex].userEmail !== userEmail) {
-      return res.status(403).json({ error: 'Not authorized to update this note' });
-    }
-
     // Update note
-    notes[noteIndex] = {
-      ...notes[noteIndex],
-      title: title || notes[noteIndex].title,
-      content: content || notes[noteIndex].content,
-      category: category || notes[noteIndex].category,
-      priority: priority || notes[noteIndex].priority,
-      updatedAt: new Date().toISOString()
-    };
+    const updatedNote = await notesService.updateNote(user.PK, noteId, {
+      title: title || existingNote.title,
+      content: content || existingNote.content,
+      category: category || existingNote.category,
+      priority: priority || existingNote.priority
+    });
 
-    res.json({ message: 'Note updated successfully', note: notes[noteIndex] });
+    res.json({ message: 'Note updated successfully', note: updatedNote });
   } catch (error) {
     console.error('Update note error:', error);
     res.status(500).json({ error: 'Server error while updating note' });
@@ -256,23 +276,27 @@ app.put('/api/notes/:id', (req, res) => {
 });
 
 // Delete a note (No Auth Required)
-app.delete('/api/notes/:id', (req, res) => {
+app.delete('/api/notes/:id', async (req, res) => {
   try {
-    const noteId = parseInt(req.params.id);
+    const noteId = req.params.id;
     const userEmail = req.headers['x-user-email'] || req.query.email;
     
-    const noteIndex = notes.findIndex(n => n.id === noteId);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
 
-    if (noteIndex === -1) {
+    const user = await userService.findUserByEmail(userEmail);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if note exists
+    const existingNote = await notesService.getNote(user.PK, noteId);
+    if (!existingNote) {
       return res.status(404).json({ error: 'Note not found' });
     }
 
-    // Optional: Verify user ownership if email is provided
-    if (userEmail && notes[noteIndex].userEmail !== userEmail) {
-      return res.status(403).json({ error: 'Not authorized to delete this note' });
-    }
-
-    notes.splice(noteIndex, 1);
+    await notesService.deleteNote(user.PK, noteId);
     res.json({ message: 'Note deleted successfully' });
   } catch (error) {
     console.error('Delete note error:', error);
@@ -283,77 +307,67 @@ app.delete('/api/notes/:id', (req, res) => {
 // ============ STATS ROUTE ============
 
 // Get user statistics (No Auth Required)
-app.get('/api/stats', (req, res) => {
-  const userEmail = req.headers['x-user-email'] || req.query.email;
-  
-  let userNotes = notes;
-  
-  // Filter by user email if provided
-  if (userEmail) {
-    const user = users.find(u => u.email === userEmail);
-    if (user) {
-      userNotes = notes.filter(note => note.userId === user.id);
+app.get('/api/stats', async (req, res) => {
+  try {
+    const userEmail = req.headers['x-user-email'] || req.query.email;
+    
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
     }
+
+    const user = await userService.findUserByEmail(userEmail);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const stats = await notesService.getUserStats(user.PK);
+    res.json(stats);
+  } catch (error) {
+    console.error('Stats error:', error);
+    res.status(500).json({ error: 'Server error fetching stats' });
   }
-  
-  const stats = {
-    totalNotes: userNotes.length,
-    highPriority: userNotes.filter(n => n.priority === 'High').length,
-    categories: [...new Set(userNotes.map(n => n.category))].length,
-    byCategory: {},
-    byPriority: {
-      High: userNotes.filter(n => n.priority === 'High').length,
-      Medium: userNotes.filter(n => n.priority === 'Medium').length,
-      Low: userNotes.filter(n => n.priority === 'Low').length
-    }
-  };
-
-  // Count notes by category
-  userNotes.forEach(note => {
-    stats.byCategory[note.category] = (stats.byCategory[note.category] || 0) + 1;
-  });
-
-  res.json(stats);
 });
 
 // Get public statistics (no authentication required)
-app.get('/api/stats/public', (req, res) => {
-  const stats = {
-    totalUsers: users.length,
-    totalNotes: notes.length,
-    notesByPriority: {
-      High: notes.filter(n => n.priority === 'High').length,
-      Medium: notes.filter(n => n.priority === 'Medium').length,
-      Low: notes.filter(n => n.priority === 'Low').length
-    },
-    notesByCategory: {}
-  };
-
-  // Count all notes by category
-  notes.forEach(note => {
-    stats.notesByCategory[note.category] = (stats.notesByCategory[note.category] || 0) + 1;
-  });
-
-  res.json(stats);
+app.get('/api/stats/public', async (req, res) => {
+  try {
+    // For public stats, we would need to scan all users and notes
+    // This is a simplified version
+    res.json({
+      totalUsers: 0,
+      totalNotes: 0,
+      notesByPriority: {
+        High: 0,
+        Medium: 0,
+        Low: 0
+      },
+      notesByCategory: {},
+      message: 'Public stats require scanning all data - implement as needed'
+    });
+  } catch (error) {
+    console.error('Public stats error:', error);
+    res.status(500).json({ error: 'Server error fetching public stats' });
+  }
 });
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Backend is running',
+    message: 'Backend is running with DynamoDB',
     timestamp: new Date().toISOString(),
-    users: users.length,
-    notes: notes.length
+    database: 'AWS DynamoDB',
+    table: process.env.DYNAMODB_TABLE_NAME
   });
 });
 
 // Root endpoint - API documentation
 app.get('/', (req, res) => {
   res.json({
-    message: '📝 Notes App API - NO AUTH REQUIRED',
-    version: '1.0.0',
-    authentication: 'DISABLED - All endpoints are publicly accessible',
+    message: '📝 Notes App API - AWS DynamoDB Backend',
+    version: '2.0.0',
+    database: 'AWS DynamoDB',
+    authentication: 'Email-based (No token required for operations)',
     endpoints: {
       health: 'GET /api/health - Health check',
       auth: {
@@ -363,7 +377,7 @@ app.get('/', (req, res) => {
         updatePassword: 'PUT /api/auth/password - Update password'
       },
       notes: {
-        getAll: 'GET /api/notes - Get all notes (or ?email=user@example.com for user notes)',
+        getAll: 'GET /api/notes - Get all notes (requires email)',
         getOne: 'GET /api/notes/:id - Get single note',
         create: 'POST /api/notes - Create note (include userEmail in body)',
         update: 'PUT /api/notes/:id - Update note',
@@ -374,14 +388,16 @@ app.get('/', (req, res) => {
         public: 'GET /api/stats/public - Get public statistics'
       }
     },
-    note: 'All endpoints are open - No authentication required!'
+    note: 'Data stored in AWS DynamoDB!'
   });
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`📝 API Documentation - ALL ENDPOINTS NO AUTH REQUIRED:`);
+  console.log(`☁️  Connected to AWS DynamoDB`);
+  console.log(`📊 Table: ${process.env.DYNAMODB_TABLE_NAME}`);
+  console.log(`📝 API Documentation:`);
   console.log(``);
   console.log(`   Auth Endpoints:`);
   console.log(`   - POST /api/auth/register    - Register new user`);
@@ -402,5 +418,5 @@ app.listen(PORT, () => {
   console.log(`   - GET  /api/health           - Health check`);
   console.log(`   - GET  /                     - API documentation`);
   console.log(``);
-  console.log(`   ✅ NO AUTHENTICATION REQUIRED - All endpoints are open!`);
+  console.log(`   ✅ Data stored in AWS DynamoDB!`);
 });
