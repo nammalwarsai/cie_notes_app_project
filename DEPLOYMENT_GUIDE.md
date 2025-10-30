@@ -110,11 +110,11 @@ AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
 
 # DynamoDB Configuration
-DYNAMODB_TABLE_NAME=NotesAppTable
+DYNAMODB_TABLE_NAME=user_data
 DYNAMODB_ENDPOINT=https://dynamodb.us-east-1.amazonaws.com
 
 # CORS Configuration (Frontend URL)
-FRONTEND_URL=http://<YOUR_EC2_PUBLIC_IP>:3001
+FRONTEND_URL=http://34.235.127.1983001
 
 # JWT Secret (Generate a strong secret)
 JWT_SECRET=your_super_secret_jwt_key_change_this_in_production
