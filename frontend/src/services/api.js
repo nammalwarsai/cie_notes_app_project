@@ -85,15 +85,11 @@ export const notesAPI = {
     return response.data;
   },
 
-  updateNote: async (id, noteData) => {
-    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const response = await api.put(`/notes/${id}`, { ...noteData, userEmail: user.email });
-    return response.data;
-  },
-
   deleteNote: async (id) => {
     const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const response = await api.delete(`/notes/${id}`, { params: { email: user.email } });
+    // Encode the ID to handle special characters like #
+    const encodedId = encodeURIComponent(id);
+    const response = await api.delete(`/notes/${encodedId}`, { params: { email: user.email } });
     return response.data;
   }
 };

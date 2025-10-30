@@ -1,4 +1,4 @@
-const { dynamoDb, TABLE_NAME, PutCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCommand } = require('../config/dynamodb');
+const { dynamoDb, TABLE_NAME, PutCommand, GetCommand, QueryCommand, DeleteCommand } = require('../config/dynamodb');
 
 class NotesService {
   // Create a new note
@@ -79,36 +79,10 @@ class NotesService {
     }
   }
 
-  // Update a note
-  async updateNote(userId, noteId, noteData) {
-    const params = {
-      TableName: TABLE_NAME,
-      Key: {
-        PK: userId,
-        SK: noteId
-      },
-      UpdateExpression: 'SET title = :title, content = :content, category = :category, priority = :priority, updatedAt = :updatedAt',
-      ExpressionAttributeValues: {
-        ':title': noteData.title,
-        ':content': noteData.content,
-        ':category': noteData.category || 'General',
-        ':priority': noteData.priority || 'Medium',
-        ':updatedAt': new Date().toISOString()
-      },
-      ReturnValues: 'ALL_NEW'
-    };
-
-    try {
-      const result = await dynamoDb.send(new UpdateCommand(params));
-      return result.Attributes;
-    } catch (error) {
-      console.error('Error updating note:', error);
-      throw error;
-    }
-  }
-
   // Delete a note
   async deleteNote(userId, noteId) {
+    console.log('🗑️ NotesService.deleteNote - UserId:', userId, 'NoteId:', noteId);
+    
     const params = {
       TableName: TABLE_NAME,
       Key: {
@@ -119,9 +93,12 @@ class NotesService {
 
     try {
       await dynamoDb.send(new DeleteCommand(params));
+      console.log('✅ Note deleted successfully from DynamoDB');
       return { message: 'Note deleted successfully' };
     } catch (error) {
-      console.error('Error deleting note:', error);
+      console.error('❌ Error deleting note:', error);
+      console.error('Error details:', error.message);
+      console.error('Error name:', error.name);
       throw error;
     }
   }

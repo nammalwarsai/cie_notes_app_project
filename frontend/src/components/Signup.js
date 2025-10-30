@@ -37,26 +37,17 @@ const Signup = () => {
     }
 
     try {
-      // Try API registration first
       await authAPI.register(email, password);
       setSuccess('Account created successfully! Redirecting to login...');
       setTimeout(() => {
         navigate('/login');
       }, 2000);
     } catch (apiError) {
-      // Fallback to localStorage if API fails
-      console.log('API registration failed, using localStorage fallback');
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
-      
-      if (users.find(u => u.email === email)) {
-        setError('User already exists');
+      console.error('Registration failed:', apiError);
+      if (apiError.response?.data?.error) {
+        setError(apiError.response.data.error);
       } else {
-        users.push({ email, password });
-        localStorage.setItem('users', JSON.stringify(users));
-        setSuccess('Account created successfully! Redirecting to login...');
-        setTimeout(() => {
-          navigate('/login');
-        }, 2000);
+        setError('Registration failed. Please ensure backend is running.');
       }
     } finally {
       setLoading(false);

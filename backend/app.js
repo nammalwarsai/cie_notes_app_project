@@ -239,67 +239,41 @@ app.post('/api/notes', async (req, res) => {
   }
 });
 
-// Update a note (No Auth Required)
-app.put('/api/notes/:id', async (req, res) => {
-  try {
-    const noteId = req.params.id;
-    const { title, content, category, priority, userEmail } = req.body;
-
-    if (!userEmail) {
-      return res.status(400).json({ error: 'User email is required' });
-    }
-
-    const user = await userService.findUserByEmail(userEmail);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Check if note exists
-    const existingNote = await notesService.getNote(user.PK, noteId);
-    if (!existingNote) {
-      return res.status(404).json({ error: 'Note not found' });
-    }
-
-    // Update note
-    const updatedNote = await notesService.updateNote(user.PK, noteId, {
-      title: title || existingNote.title,
-      content: content || existingNote.content,
-      category: category || existingNote.category,
-      priority: priority || existingNote.priority
-    });
-
-    res.json({ message: 'Note updated successfully', note: updatedNote });
-  } catch (error) {
-    console.error('Update note error:', error);
-    res.status(500).json({ error: 'Server error while updating note' });
-  }
-});
-
 // Delete a note (No Auth Required)
 app.delete('/api/notes/:id', async (req, res) => {
   try {
-    const noteId = req.params.id;
+    // Decode the noteId in case it contains special characters like #
+    const noteId = decodeURIComponent(req.params.id);
     const userEmail = req.headers['x-user-email'] || req.query.email;
+    
+    console.log('🗑️ DELETE /api/notes/:id - NoteId:', noteId, 'Email:', userEmail);
     
     if (!userEmail) {
       return res.status(400).json({ error: 'User email is required' });
     }
 
     const user = await userService.findUserByEmail(userEmail);
+    console.log('👤 User found for deletion:', user ? user.PK : 'NOT FOUND');
+    
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Check if note exists
     const existingNote = await notesService.getNote(user.PK, noteId);
+    console.log('📝 Note found for deletion:', existingNote ? existingNote.noteId : 'NOT FOUND');
+    
     if (!existingNote) {
       return res.status(404).json({ error: 'Note not found' });
     }
 
     await notesService.deleteNote(user.PK, noteId);
+    console.log('✅ Note deleted successfully:', noteId);
+    
     res.json({ message: 'Note deleted successfully' });
   } catch (error) {
-    console.error('Delete note error:', error);
+    console.error('❌ Delete note error:', error);
+    console.error('Error details:', error.message);
     res.status(500).json({ error: 'Server error while deleting note' });
   }
 });
@@ -380,7 +354,6 @@ app.get('/', (req, res) => {
         getAll: 'GET /api/notes - Get all notes (requires email)',
         getOne: 'GET /api/notes/:id - Get single note',
         create: 'POST /api/notes - Create note (include userEmail in body)',
-        update: 'PUT /api/notes/:id - Update note',
         delete: 'DELETE /api/notes/:id - Delete note'
       },
       stats: {
@@ -409,7 +382,6 @@ app.listen(PORT, () => {
   console.log(`   - GET  /api/notes            - Get all notes`);
   console.log(`   - GET  /api/notes/:id        - Get single note`);
   console.log(`   - POST /api/notes            - Create note`);
-  console.log(`   - PUT  /api/notes/:id        - Update note`);
   console.log(`   - DELETE /api/notes/:id      - Delete note`);
   console.log(``);
   console.log(`   Stats & Utility:`);

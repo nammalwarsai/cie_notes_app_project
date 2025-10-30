@@ -22,23 +22,12 @@ const Login = ({ setIsAuthenticated }) => {
     }
 
     try {
-      // Try API login first
       const response = await authAPI.login(email, password);
       setIsAuthenticated(true);
       navigate('/dashboard');
     } catch (apiError) {
-      // Fallback to localStorage if API fails
-      console.log('API login failed, using localStorage fallback');
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
-      const user = users.find(u => u.email === email && u.password === password);
-
-      if (user) {
-        localStorage.setItem('currentUser', JSON.stringify({ email }));
-        setIsAuthenticated(true);
-        navigate('/dashboard');
-      } else {
-        setError('Invalid email or password');
-      }
+      console.error('Login failed:', apiError);
+      setError('Invalid email or password. Please try again.');
     } finally {
       setLoading(false);
     }

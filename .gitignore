@@ -43,3 +43,20 @@ coverage/
 .cache/
 .temp/
 .tmp/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Credentials and sensitive files
+*credentials*.txt
+*.pem
+*.key

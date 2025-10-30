@@ -40,28 +40,14 @@ const Profile = () => {
     setLoading(true);
 
     try {
-      // Try backend API first
       await authAPI.updatePassword(user.email, newPassword);
       setSuccess('Password updated successfully!');
       setIsEditing(false);
       setNewPassword('');
       setConfirmPassword('');
     } catch (apiError) {
-      // Fallback to localStorage
-      console.log('API password update failed, using localStorage fallback');
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
-      const userIndex = users.findIndex(u => u.email === user.email);
-      
-      if (userIndex !== -1) {
-        users[userIndex].password = newPassword;
-        localStorage.setItem('users', JSON.stringify(users));
-        setSuccess('Password updated successfully!');
-        setIsEditing(false);
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        setError('Failed to update password');
-      }
+      console.error('Password update failed:', apiError);
+      setError('Failed to update password. Please ensure backend is running.');
     } finally {
       setLoading(false);
     }
